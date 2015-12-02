@@ -63,9 +63,7 @@ chrome.tabs.onCreated.addListener !->
 # to send us a message, since we can't run on "chrome://" URLs.
 chrome.tabs.onUpdated.addListener (tabId, changeInfo, tab) !->
   if 0 == changeInfo.url?.indexOf 'chrome://'
-    if openTabs[tabId]?
-      openTabs[tabId].lastFocusTime = +new Date
-    else
+    unless openTabs[tabId]?
       openTabs[tabId] =
         lastFocusTime: +new Date
 
@@ -78,8 +76,8 @@ chrome.tabs.onRemoved.addListener (tabId) !->
   delete! openTabs[tabId]
   openTabsListLock.release!
   if closingTabs[tabId]
-    closeTab!
     delete! closingTabs[tabId]
+    closeTab!
 
 
 # Close notifications when clicked.
@@ -105,12 +103,12 @@ chrome.notifications.onClosed.addListener (notifId) !->
 
 # Listen for when a tab is focused.
 messageListen \tab_focused (sender, timestamp) !->
+  return unless sender?.tab?.id?
   if openTabs[sender.tab.id]?
     openTabs[sender.tab.id].lastFocusTime = timestamp
   else
     openTabs[sender.tab.id] =
       lastFocusTime: timestamp
-    openTabsCount++
 
 #
 # Helper functions
