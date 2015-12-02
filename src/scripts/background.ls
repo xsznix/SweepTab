@@ -4,9 +4,18 @@
 # Constants
 #
 
+# The maximum number of open tabs the user may have open before we close one.
 const MAX_OPEN_TABS = 5
+
+# The index of the "Restore" button in a tab closing notification.
 const NOTIF_BUTTON_RESTORE = 0
+
+# The index of the "Bookmark" button in a tab closing notification.
 const NOTIF_BUTTON_BOOKMARK = 1
+
+# The amount of leniency between the time we observed the tab closing and the
+# time Chrome observed the tab closing we allow when searching for a closed tab
+# in Chrome's recently closed sessions array.
 const CLOSE_TIME_THRESHOLD = 2000_ms
 
 
@@ -14,20 +23,24 @@ const CLOSE_TIME_THRESHOLD = 2000_ms
 # Globals
 #
 
+# A lock to prevent openTabs from changing during asynchronous callbacks in
+# closeTab.
 openTabsListLock = new Lock!
-# Acquire the lock to prevent any modifications to openTabs until we are done
-# initializing the extension.
-openTabsListLock.acquire ->
+openTabsListLock.acquire -> # Hold it until we initialize opneTabs.
 
-# Array of:
-# - [index = tab ID] (int)
+# A sparse array of open tabs.
+# Hash of:
+# - [key = tab ID] (int)
 # - lastFocusTime (timestamp)
 openTabs = []
 openTabsCount = 0
-activeTab = null
 
+# An array of tabs that we have closed but have not yet received the onRemoved
+# event for.
+# Array of tab IDs.
 closingTabs = []
 
+# An array of notifications that are currently being displayed to the user.
 # Hash of:
 # - [key = notification ID] (string)
 # - url (string)
@@ -37,7 +50,7 @@ openNotifications = {}
 
 
 #
-# Message listeners
+# Event and message listeners
 #
 
 # Try to close a tab when the user creates a new tab if the user has too many
@@ -45,6 +58,16 @@ openNotifications = {}
 chrome.tabs.onCreated.addListener !->
   openTabsCount++
   closeTab!
+
+# When a tab with a "chrome://" URL is opened, don't wait for our content script
+# to send us a message, since we can't run on "chrome://" URLs.
+chrome.tabs.onUpdated.addListener (tabId, changeInfo, tab) !->
+  if 0 == changeInfo.url?.indexOf 'chrome://'
+    if openTabs[tabId]?
+      openTabs[tabId].lastFocusTime = +new Date
+    else
+      openTabs[tabId] =
+        lastFocusTime: +new Date
 
 
 # Removes tab metadata from array.
@@ -59,11 +82,10 @@ chrome.tabs.onRemoved.addListener (tabId) !->
     delete! closingTabs[tabId]
 
 
-# Updates metadata for the active tab upon activation.
-chrome.tabs.onActivated.addListener (info) !->
-  activeTab = info.tabId
-  openTabs[info.tabId] =
-    lastFocusTime: +new Date
+# Close notifications when clicked.
+chrome.notifications.onClicked.addListener (notifId) !->
+  notif = openNotifications[notifId]
+  if notif? then chrome.notifications.clear notifId
 
 
 # Handle notification button action.
@@ -75,15 +97,27 @@ chrome.notifications.onButtonClicked.addListener (notifId, button) !->
   | NOTIF_BUTTON_BOOKMARK => bookmarkTab notif
   chrome.notifications.clear notifId
 
+
 # Destroy notification metadata.
 chrome.notifications.onClosed.addListener (notifId) !->
   delete! openNotifications[notifId]
 
 
+# Listen for when a tab is focused.
+messageListen \tab_focused (sender, timestamp) !->
+  if openTabs[sender.tab.id]?
+    openTabs[sender.tab.id].lastFocusTime = timestamp
+  else
+    openTabs[sender.tab.id] =
+      lastFocusTime: timestamp
+    openTabsCount++
+
 #
 # Helper functions
 #
 
+# Tries to find a tab to close, then closes it and notifies the user of the
+# event.
 !function closeTab
   <-! openTabsListLock.acquire
   if openTabsCount <= MAX_OPEN_TABS
@@ -102,14 +136,14 @@ chrome.notifications.onClosed.addListener (notifId) !->
     # A tab that has just been opened may not have yet been added to `openTabs'.
     if openTabs[tab.id] is undefined then continue
     # Always prefer closing new tabs.
-    if tab.url == 'chrome://newtab/'
-      toRemove := tab
+    if tab.url == 'chrome://newtab/' or tab.url.indexOf('www.google.com/_/chrome/newtab') != -1
+      toRemove = tab
       removingNewtabPage = true
       break;
     # Otherwise, prefer closing the tab that was viewed last
     else if openTabs[tab.id].lastFocusTime < toRemoveTime
-      toRemove := tab
-      toRemoveTime := openTabs[tab.id].lastFocusTime
+      toRemove = tab
+      toRemoveTime = openTabs[tab.id].lastFocusTime
   unless toRemove?
     openTabsListLock.release!
     return
@@ -122,7 +156,8 @@ chrome.notifications.onClosed.addListener (notifId) !->
   # Retry if we failed to close the tab.
   if chrome.runtime.lastError?
     openTabsListLock.release!
-    setTimeout closeTabs, 0
+    setTimeout closeTab, 0
+    return
   # New tab pages aren't important enough for notifications.
   if removingNewtabPage
     openTabsListLock.release!
@@ -158,10 +193,10 @@ chrome.notifications.onClosed.addListener (notifId) !->
   sessions <-! chrome.sessions.getRecentlyClosed
   toRestore = null
   return unless sessions.some (session) ->
-    return session.tab? and
-      session.tab.url == notif.url and
-      notif.closeTime - CLOSE_TIME_THRESHOLD < session.lastModified * 1000 < notif.closeTime + CLOSE_TIME_THRESHOLD and
-      toRestore := session
+    session.tab? and
+    session.tab.url == notif.url and
+    notif.closeTime - CLOSE_TIME_THRESHOLD < session.lastModified * 1000 < notif.closeTime + CLOSE_TIME_THRESHOLD and
+    toRestore := session
 
   <-! chrome.sessions.restore toRestore.sessionId
 

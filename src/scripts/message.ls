@@ -35,7 +35,7 @@ chrome.runtime.onMessage.addListener (message, sender, sendResponse) !->
   return unless handler?
 
   # Handle the message.
-  response = handler.apply message.args
+  response = handler.apply null, [sender] ++ message.args
   return unless response?
 
   # If applicable, send a response back.

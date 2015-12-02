@@ -16,4 +16,4 @@ notif_restore:
 
 notif_bookmark:
   message: 'Bookmark'
-  description: 'Button label for notification action button to bookmark the last visited URL of a '
+  description: 'Button label for notification action button to bookmark the last visited URL of a tab that SweepTab closed.'
