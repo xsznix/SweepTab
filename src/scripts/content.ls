@@ -5,9 +5,8 @@
 const MIN_FOCUSED_TIME = 2000_ms
 var focusTimeout
 
-document
-  ..addEventListener \focus, focusHandler
-  ..addEventListener \blur, blurHandler
+onfocus = focusHandler
+onblur = blurHandler
 
 !function focusHandler
   focusTimeout := setTimeout sendFocusedMessage, MIN_FOCUSED_TIME
@@ -18,4 +17,4 @@ document
 !function sendFocusedMessage
   messageSend \tab_focused, [+new Date]
 
-focusHandler!
+sendFocusedMessage!

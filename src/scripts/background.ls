@@ -5,7 +5,7 @@
 #
 
 # The maximum number of open tabs the user may have open before we close one.
-const MAX_OPEN_TABS = 5
+const MAX_OPEN_TABS = 10
 
 # The index of the "Restore" button in a tab closing notification.
 const NOTIF_BUTTON_RESTORE = 0
@@ -64,8 +64,7 @@ chrome.tabs.onCreated.addListener !->
 chrome.tabs.onUpdated.addListener (tabId, changeInfo, tab) !->
   if 0 == changeInfo.url?.indexOf 'chrome://'
     unless openTabs[tabId]?
-      openTabs[tabId] =
-        lastFocusTime: +new Date
+      openTabs[tabId] = createOpenTabsElem!
 
 
 # Removes tab metadata from array.
@@ -104,11 +103,11 @@ chrome.notifications.onClosed.addListener (notifId) !->
 # Listen for when a tab is focused.
 messageListen \tab_focused (sender, timestamp) !->
   return unless sender?.tab?.id?
+  console.log 'Tab ' + sender.tab.id + ' focused: ', sender.tab.url
   if openTabs[sender.tab.id]?
     openTabs[sender.tab.id].lastFocusTime = timestamp
   else
-    openTabs[sender.tab.id] =
-      lastFocusTime: timestamp
+    openTabs[sender.tab.id] = createOpenTabsElem!
 
 #
 # Helper functions
@@ -163,7 +162,7 @@ messageListen \tab_focused (sender, timestamp) !->
 
   # Notify the user.
   iconUrl = toRemove.favIconUrl
-  if 'http' != iconUrl.substring 0 4
+  if not iconUrl? or 'http' != iconUrl.substring 0 4
     iconUrl = chrome.extension.getURL 'assets/blank32.png'
   notifId <-! chrome.notifications.create null do
     type: \basic
@@ -188,15 +187,27 @@ messageListen \tab_focused (sender, timestamp) !->
 # session IDs in Chrome, so we take an educated guess as to the session ID given
 # the URL we knew the tab was last on and the time we closed the tab.
 !function restoreTab notif
-  sessions <-! chrome.sessions.getRecentlyClosed
+  # If restoring a session fails for any reason, simply open a new tab at the
+  # last URL that the closed tab was on.
+  !function backupRestore
+    chrome.tabs.create do
+      url: notif.url
+
   toRestore = null
-  return unless sessions.some (session) ->
+  function matchSession session
     session.tab? and
     session.tab.url == notif.url and
-    notif.closeTime - CLOSE_TIME_THRESHOLD < session.lastModified * 1000 < notif.closeTime + CLOSE_TIME_THRESHOLD and
+    notif.closeTime - CLOSE_TIME_THRESHOLD <
+      session.lastModified * 1000 <
+      notif.closeTime + CLOSE_TIME_THRESHOLD and
     toRestore := session
 
-  <-! chrome.sessions.restore toRestore.sessionId
+  sessions <-! chrome.sessions.getRecentlyClosed
+  if sessions.some matchSession
+    <-! chrome.sessions.restore toRestore.sessionId
+    backupRestore! if chrome.runtime.lastError?
+  else
+    backupRestore!
 
 
 # Adds the URL described by `notif' as a new bookmark in the "Saved by
@@ -205,6 +216,10 @@ messageListen \tab_focused (sender, timestamp) !->
   # Unimplemented.
   debugger
 
+
+# Creates a new element that can be inserted into `openTabs'.
+function createOpenTabsElem
+  lastFocusTime: +new Date
 
 #
 # Initialization
