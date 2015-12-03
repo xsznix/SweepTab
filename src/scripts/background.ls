@@ -105,6 +105,8 @@ chrome.tabs.onActivated.addListener (activeInfo) !->
       ), MIN_FOCUS_TIME
   else
     console.warn 'Tab not found in openTabs: ' + tabId
+    tab <-! chrome.tabs.query {id: tabId}
+    openTabs[tabId] = (createOpenTabsElem tab) with timesFocused: 1
 
 
 # Close notifications when clicked.
