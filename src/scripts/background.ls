@@ -32,6 +32,8 @@ openTabsListLock.acquire -> # Hold it until we initialize opneTabs.
 # Hash of:
 # - [key = tab ID] (int)
 # - lastFocusTime (timestamp)
+# - parentId (int: tab ID)
+# - numChildTabs (int)
 openTabs = []
 openTabsCount = 0
 
@@ -55,21 +57,18 @@ openNotifications = {}
 
 # Try to close a tab when the user creates a new tab if the user has too many
 # tabs open.
-chrome.tabs.onCreated.addListener !->
+chrome.tabs.onCreated.addListener (tab) !->
   openTabsCount++
+  openTabs[tab.id] = createOpenTabsElem tab
   closeTab!
 
-# When a tab with a "chrome://" URL is opened, don't wait for our content script
-# to send us a message, since we can't run on "chrome://" URLs.
-chrome.tabs.onUpdated.addListener (tabId, changeInfo, tab) !->
-  if 0 == changeInfo.url?.indexOf 'chrome://'
-    unless openTabs[tabId]?
-      openTabs[tabId] = createOpenTabsElem!
 
-
-# Removes tab metadata from array.
+# Removes tab metadata from array. Updates parent's child tab count.
 chrome.tabs.onRemoved.addListener (tabId) !->
   openTabsCount--
+  parentId = openTabs[tabId].parentId
+  if parentId?
+    openTabs[parentId].numChildTabs--
   # Since we are deleting information from `openTabs', we need to hold its lock.
   <-! openTabsListLock.acquire
   delete! openTabs[tabId]
@@ -107,7 +106,7 @@ messageListen \tab_focused (sender, timestamp) !->
   if openTabs[sender.tab.id]?
     openTabs[sender.tab.id].lastFocusTime = timestamp
   else
-    openTabs[sender.tab.id] = createOpenTabsElem!
+    console.warn 'Tab not found in openTabs: ' + sender.tab.id
 
 #
 # Helper functions
@@ -217,9 +216,15 @@ messageListen \tab_focused (sender, timestamp) !->
   debugger
 
 
-# Creates a new element that can be inserted into `openTabs'.
-function createOpenTabsElem
-  lastFocusTime: +new Date
+# Creates a new element that can be inserted into `openTabs'. Updates the child
+# tab count of parent.
+function createOpenTabsElem tab
+  if tab.openerTabId? and openTabs[tab.openerTabId]
+    openTabs[tab.openerTabId].numChildTabs++
+  do
+    lastFocusTime: +new Date
+    parentId: tab.openerTabId ? null
+    numChildTabs: 0
 
 #
 # Initialization
@@ -230,6 +235,5 @@ tabs <-! chrome.tabs.query {}
 openTabsCount := tabs.length
 now = +new Date
 tabs.forEach (tab) !->
-  openTabs[tab.id] =
-    lastFocusTime: now
+  openTabs[tab.id] = createOpenTabsElem tab
 openTabsListLock.release!

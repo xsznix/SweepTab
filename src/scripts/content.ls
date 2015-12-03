@@ -16,5 +16,3 @@ onblur = blurHandler
 
 !function sendFocusedMessage
   messageSend \tab_focused, [+new Date]
-
-sendFocusedMessage!
