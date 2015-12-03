@@ -18,6 +18,14 @@ const NOTIF_BUTTON_BOOKMARK = 1
 # in Chrome's recently closed sessions array.
 const CLOSE_TIME_THRESHOLD = 2000_ms
 
+# The minimum amount of time a tab has to be focused for it to be counted as
+# actually focused.
+const MIN_FOCUS_TIME = 1000_ms
+
+# Print out debug logging.
+const logging = true
+!function log msg
+  if logging then console.log msg
 
 #
 # Globals
@@ -32,10 +40,14 @@ openTabsListLock.acquire -> # Hold it until we initialize opneTabs.
 # Hash of:
 # - [key = tab ID] (int)
 # - lastFocusTime (timestamp)
+# - timesFocused (int)
 # - parentId (int: tab ID)
 # - numChildTabs (int)
 openTabs = []
 openTabsCount = 0
+
+# Timeout to update the lastFocusTime of a tab.
+var focusTimeout
 
 # An array of tabs that we have closed but have not yet received the onRemoved
 # event for.
@@ -59,6 +71,7 @@ openNotifications = {}
 # tabs open.
 chrome.tabs.onCreated.addListener (tab) !->
   openTabsCount++
+  log 'Tab ' + tab.id + ' created.'
   openTabs[tab.id] = createOpenTabsElem tab
   closeTab!
 
@@ -66,9 +79,10 @@ chrome.tabs.onCreated.addListener (tab) !->
 # Removes tab metadata from array. Updates parent's child tab count.
 chrome.tabs.onRemoved.addListener (tabId) !->
   openTabsCount--
-  parentId = openTabs[tabId].parentId
+  parentId = openTabs[tabId]?.parentId
   if parentId?
     openTabs[parentId].numChildTabs--
+  log 'Tab ' + tabId + ' closing.'
   # Since we are deleting information from `openTabs', we need to hold its lock.
   <-! openTabsListLock.acquire
   delete! openTabs[tabId]
@@ -76,6 +90,21 @@ chrome.tabs.onRemoved.addListener (tabId) !->
   if closingTabs[tabId]
     delete! closingTabs[tabId]
     closeTab!
+
+
+# Listen for when a tab is focused.
+chrome.tabs.onActivated.addListener (activeInfo) !->
+  clearTimeout focusTimeout
+  tabId = activeInfo.tabId
+  if openTabs[tabId]?
+    focusTimeout := setTimeout (!->
+      log 'Tab ' + tabId + ' focused.'
+      openTabs[tabId]
+        ..lastFocusTime = +new Date
+        ..timesFocused++
+      ), MIN_FOCUS_TIME
+  else
+    console.warn 'Tab not found in openTabs: ' + tabId
 
 
 # Close notifications when clicked.
@@ -97,16 +126,6 @@ chrome.notifications.onButtonClicked.addListener (notifId, button) !->
 # Destroy notification metadata.
 chrome.notifications.onClosed.addListener (notifId) !->
   delete! openNotifications[notifId]
-
-
-# Listen for when a tab is focused.
-messageListen \tab_focused (sender, timestamp) !->
-  return unless sender?.tab?.id?
-  console.log 'Tab ' + sender.tab.id + ' focused: ', sender.tab.url
-  if openTabs[sender.tab.id]?
-    openTabs[sender.tab.id].lastFocusTime = timestamp
-  else
-    console.warn 'Tab not found in openTabs: ' + sender.tab.id
 
 #
 # Helper functions
@@ -223,6 +242,7 @@ function createOpenTabsElem tab
     openTabs[tab.openerTabId].numChildTabs++
   do
     lastFocusTime: +new Date
+    timesFocused: 0
     parentId: tab.openerTabId ? null
     numChildTabs: 0
 
@@ -235,5 +255,6 @@ tabs <-! chrome.tabs.query {}
 openTabsCount := tabs.length
 now = +new Date
 tabs.forEach (tab) !->
+  log 'Tab ' + tab.id + ' initialized.'
   openTabs[tab.id] = createOpenTabsElem tab
 openTabsListLock.release!

@@ -16,14 +16,4 @@ permissions:
 background:
   scripts:
     'scripts/synch.js'
-    'scripts/message.js'
     'scripts/background.js'
-
-content_scripts: [
-  matches:
-    'http://*/*'
-    'https://*/*'
-  js:
-    'scripts/message.js'
-    'scripts/content.js'
-  ]
