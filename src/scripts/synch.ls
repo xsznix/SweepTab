@@ -18,3 +18,6 @@ class Lock
       setTimeout @waiters.shift!, 0
     else
       @held = false
+
+# Exports.
+window['Lock'] = Lock

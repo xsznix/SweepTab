@@ -23,9 +23,14 @@ const CLOSE_TIME_THRESHOLD = 2000_ms
 const MIN_FOCUS_TIME = 1000_ms
 
 # Print out debug logging.
-const logging = true
-!function log msg
-  if logging then console.log msg
+const debug = true
+!function log
+  if debug
+    switch &length
+    | 1 => console.log &0
+    | 2 => console.log &0, &1
+    | 3 => console.log &0, &1, &2
+    | otherwise => console.log 'Too many arguments in logging call!'
 
 #
 # Globals
@@ -69,7 +74,7 @@ openNotifications = {}
 
 # Try to close a tab when the user creates a new tab if the user has too many
 # tabs open.
-chrome.tabs.onCreated.addListener (tab) !->
+chrome\tabs .\onCreated .\addListener (tab) !->
   openTabsCount++
   log 'Tab ' + tab.id + ' created.'
   openTabs[tab.id] = createOpenTabsElem tab
@@ -77,7 +82,7 @@ chrome.tabs.onCreated.addListener (tab) !->
 
 
 # Removes tab metadata from array. Updates parent's child tab count.
-chrome.tabs.onRemoved.addListener (tabId) !->
+chrome\tabs .\onRemoved .\addListener (tabId) !->
   openTabsCount--
   parentId = openTabs[tabId]?.parentId
   if parentId?
@@ -93,7 +98,7 @@ chrome.tabs.onRemoved.addListener (tabId) !->
 
 
 # Listen for when a tab is focused.
-chrome.tabs.onActivated.addListener (activeInfo) !->
+chrome\tabs .\onActivated .\addListener (activeInfo) !->
   clearTimeout focusTimeout
   tabId = activeInfo.tabId
   if openTabs[tabId]?
@@ -105,28 +110,28 @@ chrome.tabs.onActivated.addListener (activeInfo) !->
       ), MIN_FOCUS_TIME
   else
     console.warn 'Tab not found in openTabs: ' + tabId
-    tab <-! chrome.tabs.get {id: tabId}
+    tab <-! chrome\tabs .\get tabId
     openTabs[tabId] = (createOpenTabsElem tab) with timesFocused: 1
 
 
 # Close notifications when clicked.
-chrome.notifications.onClicked.addListener (notifId) !->
+chrome\notifications .\onClicked .\addListener (notifId) !->
   notif = openNotifications[notifId]
-  if notif? then chrome.notifications.clear notifId
+  if notif? then chrome\notifications .\clear notifId
 
 
 # Handle notification button action.
-chrome.notifications.onButtonClicked.addListener (notifId, button) !->
+chrome\notifications .\onButtonClicked .\addListener (notifId, button) !->
   notif = openNotifications[notifId]
   return unless notif?
   switch button
   | NOTIF_BUTTON_RESTORE  => restoreTab notif
   | NOTIF_BUTTON_BOOKMARK => bookmarkTab notif
-  chrome.notifications.clear notifId
+  chrome\notifications .\clear notifId
 
 
 # Destroy notification metadata.
-chrome.notifications.onClosed.addListener (notifId) !->
+chrome\notifications .\onClosed .\addListener (notifId) !->
   delete! openNotifications[notifId]
 
 #
@@ -142,7 +147,7 @@ chrome.notifications.onClosed.addListener (notifId) !->
     return
 
   # Find a tab to close.
-  tabs <-! chrome.tabs.query do
+  tabs <-! chrome\tabs .\query do
     pinned: false  # Pinned tabs are important, so ignore those.
     active: false  # Never close a tab the user has active.
     audible: false # Never close a tab that could be playing background music.
@@ -153,11 +158,11 @@ chrome.notifications.onClosed.addListener (notifId) !->
     # A tab that has just been opened may not have yet been added to `openTabs'.
     if openTabs[tab.id] is undefined then continue
     # Always prefer closing new tabs.
-    if tab.url == 'chrome://newtab/' or tab.url.indexOf('www.google.com/_/chrome/newtab') != -1
+    if 'chrome://newtab/' == tab.url or -1 != tab.url.indexOf 'www.google.com/_/chrome/newtab'
       toRemove = tab
       removingNewtabPage = true
-      break;
-    # Otherwise, prefer closing the tab that was viewed last
+      break
+    # Otherwise, prefer closing the tab that was viewed the least recently
     else if openTabs[tab.id].lastFocusTime < toRemoveTime
       toRemove = tab
       toRemoveTime = openTabs[tab.id].lastFocusTime
@@ -169,9 +174,9 @@ chrome.notifications.onClosed.addListener (notifId) !->
   closingTabs[toRemove.id] = true # This tells the `tabs.onRemoved' listener to
                                   # call closeTabs again once that tab has been
                                   # removed.
-  <-! chrome.tabs.remove toRemove.id
+  <-! chrome\tabs .\remove toRemove.id
   # Retry if we failed to close the tab.
-  if chrome.runtime.lastError?
+  if chrome\runtime [\lastError]?
     openTabsListLock.release!
     setTimeout closeTab, 0
     return
@@ -183,16 +188,16 @@ chrome.notifications.onClosed.addListener (notifId) !->
   # Notify the user.
   iconUrl = toRemove.favIconUrl
   if not iconUrl? or 'http' != iconUrl.substring 0 4
-    iconUrl = chrome.extension.getURL 'assets/blank32.png'
-  notifId <-! chrome.notifications.create null do
+    iconUrl = chrome\extension .\getURL 'assets/blank32.png'
+  notifId <-! chrome\notifications .\create null do
     type: \basic
     iconUrl: iconUrl
-    title: chrome.i18n.getMessage \notif_closed_tab
+    title: chrome\i18n .\getMessage \notif_closed_tab
     message: toRemove.title
     contextMessage: toRemove.url
     buttons:
-      * title: chrome.i18n.getMessage \notif_restore
-      * title: chrome.i18n.getMessage \notif_bookmark
+      * title: chrome\i18n .\getMessage \notif_restore
+      * title: chrome\i18n .\getMessage \notif_bookmark
 
   # Allow the notification to be acted upon later.
   openNotifications[notifId] =
@@ -210,7 +215,7 @@ chrome.notifications.onClosed.addListener (notifId) !->
   # If restoring a session fails for any reason, simply open a new tab at the
   # last URL that the closed tab was on.
   !function backupRestore
-    chrome.tabs.create do
+    chrome\tabs .\create do
       url: notif.url
 
   toRestore = null
@@ -222,10 +227,10 @@ chrome.notifications.onClosed.addListener (notifId) !->
       notif.closeTime + CLOSE_TIME_THRESHOLD and
     toRestore := session
 
-  sessions <-! chrome.sessions.getRecentlyClosed
+  sessions <-! chrome\sessions .\getRecentlyClosed
   if sessions.some matchSession
-    <-! chrome.sessions.restore toRestore.sessionId
-    backupRestore! if chrome.runtime.lastError?
+    <-! chrome\sessions .\restore toRestore.sessionId
+    backupRestore! if chrome\runtime [\lastError]?
   else
     backupRestore!
 
@@ -249,11 +254,22 @@ function createOpenTabsElem tab
     numChildTabs: 0
 
 #
+# Debug exports
+#
+if debug
+  window[\getOpenTabs] = ->
+    openTabs: openTabs
+    openTabsCount: openTabsCount
+  window[\getClosingTabs] = -> closingTabs
+  window[\getOpenNotifications] = -> openNotifications
+  window[\setMaxOpenTabs] = (newMax) !-> MAX_OPEN_TABS = newMax
+
+#
 # Initialization
 #
 
 # Prepopulate openTabs array.
-tabs <-! chrome.tabs.query {}
+tabs <-! chrome\tabs .\query {}
 openTabsCount := tabs.length
 now = +new Date
 tabs.forEach (tab) !->

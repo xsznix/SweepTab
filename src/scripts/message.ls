@@ -5,11 +5,11 @@ messageHandlers = {}
 
 # Adds a listener for a certain type of message from the extension's background
 # page.
-!function messageListen type, callback
+!function listen type, callback
   messageHandlers[type] = callback
 
 # Sends a message to the background tab.
-!function messageSend type, args, cb
+!function send type, args, cb
   msg =
     type: type
     args: args
@@ -19,7 +19,7 @@ messageHandlers = {}
     chrome.runtime.sendMessage null, msg
 
 # Sends a message to the a specific tab.
-!function messageSendToTab tabId, type, args, cb
+!function sendToTab tabId, type, args, cb
   msg =
     type: type
     args: args
@@ -40,3 +40,9 @@ chrome.runtime.onMessage.addListener (message, sender, sendResponse) !->
 
   # If applicable, send a response back.
   sendResponse response
+
+# Exports.
+window['Message'] = do
+  listen: listen
+  send: send
+  sendToTab: sendToTab
